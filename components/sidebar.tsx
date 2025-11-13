@@ -66,7 +66,7 @@ export function Sidebar() {
         {displayCount !== null && (
           <div className="pb-3 pt-3 border-t border-border flex justify-center">
             <div className="inline-flex items-center justify-center rounded-full border border-transparent bg-primary/15 px-2.5 py-1 text-xs font-semibold text-primary shadow-[0_10px_30px_rgba(255,255,255,0.15)]">
-              You are the {displayCount.toLocaleString()} user
+              {displayCount.toLocaleString()} users have joined Focus
             </div>
           </div>
         )}
