@@ -91,6 +91,8 @@ export default function Home() {
   const [togglingSubtaskId, setTogglingSubtaskId] = useState<string | null>(null);
   const [selectedTasks, setSelectedTasks] = useState<Array<{ todoId: string; subtaskIds: string[] }>>([]);
   const [showTaskSelector, setShowTaskSelector] = useState(false);
+  const [fadingTodoId, setFadingTodoId] = useState<string | null>(null);
+  const fadeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const filteredTodos = useMemo(() => {
     if (!searchTerm) return todos;
@@ -195,6 +197,15 @@ export default function Home() {
       checkAndArchive();
     }
   }, [checkAndArchive, bootstrapState.requiresAuth, bootstrapState.loading]);
+
+  // Cleanup fade timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (fadeTimeoutRef.current) {
+        clearTimeout(fadeTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const waitActive = Boolean(waitCountdown);
   const focusActive = focusSession?.status === "active";
@@ -499,10 +510,27 @@ export default function Home() {
 
   const handleToggleSubtask = async (todoId: string, subtaskId: string) => {
     let previousValue = false;
+    let updatedTodo: Todo | null = null;
+    
+    // Get the current value before updating
+    const currentTodo = todos.find((t) => t.id === todoId);
+    const currentSubtask = currentTodo?.subtasks.find((s) => s.id === subtaskId);
+    const isUnchecking = currentSubtask?.done === true;
+    
+    // If this todo is currently fading and user is unchecking a subtask, cancel fading
+    if (fadingTodoId === todoId && isUnchecking) {
+      // Clear the fade timeout
+      if (fadeTimeoutRef.current) {
+        clearTimeout(fadeTimeoutRef.current);
+        fadeTimeoutRef.current = null;
+      }
+      setFadingTodoId(null);
+    }
+    
     setTodos((prev) =>
       prev.map((todo) => {
         if (todo.id !== todoId) return todo;
-        return {
+        const updated: Todo = {
           ...todo,
           subtasks: todo.subtasks.map((subtask) => {
             if (subtask.id !== subtaskId) return subtask;
@@ -510,6 +538,8 @@ export default function Home() {
             return { ...subtask, done: !subtask.done };
           }),
         };
+        updatedTodo = updated;
+        return updated;
       }),
     );
     setTogglingSubtaskId(subtaskId);
@@ -521,6 +551,34 @@ export default function Home() {
       });
       if (!response.ok) {
         throw new Error("Failed to update subtask");
+      }
+      
+      // Check if this was the last subtask being completed
+      const todo = updatedTodo as Todo | null;
+      if (todo && !previousValue && todo.subtasks.length > 0) {
+        const allDone = todo.subtasks.every((s: Subtask) => s.done);
+        if (allDone) {
+          // Start fading effect
+          setFadingTodoId(todoId);
+          // Archive after 3 seconds
+          fadeTimeoutRef.current = setTimeout(async () => {
+            try {
+              const archiveResponse = await fetch("/api/ctdp/archive/auto", {
+                method: "POST",
+              });
+              if (archiveResponse.ok) {
+                // Remove from todos list
+                setTodos((prev) => prev.filter((todo) => todo.id !== todoId));
+                setFadingTodoId(null);
+                fadeTimeoutRef.current = null;
+              }
+            } catch (error) {
+              console.error("Failed to archive:", error);
+              setFadingTodoId(null);
+              fadeTimeoutRef.current = null;
+            }
+          }, 3000);
+        }
       }
     } catch (error) {
       console.error(error);
@@ -541,8 +599,10 @@ export default function Home() {
       );
     } finally {
       setTogglingSubtaskId(null);
-      // Check if we should archive after updating subtask
-      checkAndArchive();
+      // Only check archive if not fading (to avoid double archiving)
+      if (!fadingTodoId) {
+        checkAndArchive();
+      }
     }
   };
 
@@ -778,22 +838,31 @@ export default function Home() {
                       No tasks yet
                     </p>
                   )}
-                  {filteredTodos.map((todo) => (
-                    <TodoItem
-                      key={todo.id}
-                      todo={todo}
-              onToggleSubtask={handleToggleSubtask}
-              togglingSubtaskId={togglingSubtaskId}
-              onAddSubtask={handleAddSubtask}
-              pendingTodoId={subtaskPendingTodoId}
-                      selectedTasks={selectedTasks}
-                      onToggleTaskSelection={handleToggleTaskSelection}
-                      onDeleteTodo={handleDeleteTodo}
-                      onUpdateTodo={handleUpdateTodo}
-                      onDeleteSubtask={handleDeleteSubtask}
-                      onUpdateSubtask={handleUpdateSubtask}
-                    />
-                  ))}
+                  <AnimatePresence>
+                    {filteredTodos.map((todo) => (
+                      <motion.div
+                        key={todo.id}
+                        initial={{ opacity: 1 }}
+                        animate={{ opacity: fadingTodoId === todo.id ? 0 : 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 3, ease: "easeOut" }}
+                      >
+                        <TodoItem
+                          todo={todo}
+                          onToggleSubtask={handleToggleSubtask}
+                          togglingSubtaskId={togglingSubtaskId}
+                          onAddSubtask={handleAddSubtask}
+                          pendingTodoId={subtaskPendingTodoId}
+                          selectedTasks={selectedTasks}
+                          onToggleTaskSelection={handleToggleTaskSelection}
+                          onDeleteTodo={handleDeleteTodo}
+                          onUpdateTodo={handleUpdateTodo}
+                          onDeleteSubtask={handleDeleteSubtask}
+                          onUpdateSubtask={handleUpdateSubtask}
+                        />
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
           </div>
               </CardContent>
             </Card>

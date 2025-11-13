@@ -10,7 +10,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { CheckCircle2, RotateCcw } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useMemo } from "react";
 
 type Subtask = {
   id: string;
@@ -26,9 +29,22 @@ type ArchivedTodo = {
 };
 
 export default function ArchivePage() {
+  const router = useRouter();
   const [todos, setTodos] = useState<ArchivedTodo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [restoringTodoId, setRestoringTodoId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const filteredTodos = useMemo(() => {
+    if (!searchTerm) return todos;
+    return todos.filter((todo) =>
+      todo.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      todo.subtasks.some((subtask) =>
+        subtask.label.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    );
+  }, [todos, searchTerm]);
 
   const loadArchive = useCallback(async () => {
     setLoading(true);
@@ -63,6 +79,29 @@ export default function ArchivePage() {
     return `${month}月${day}日`;
   };
 
+  const handleRestore = async (todoId: string) => {
+    setRestoringTodoId(todoId);
+    try {
+      const response = await fetch("/api/ctdp/archive/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ todoId }),
+      });
+      if (!response.ok) {
+        throw new Error("Failed to restore todo");
+      }
+      // Remove from archive list
+      setTodos((prev) => prev.filter((todo) => todo.id !== todoId));
+      // Redirect to home page
+      router.push("/");
+    } catch (err) {
+      console.error(err);
+      alert("恢复任务失败，请稍后再试。");
+    } finally {
+      setRestoringTodoId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-screen">
@@ -80,10 +119,18 @@ export default function ArchivePage() {
     <div className="flex h-screen">
       <Sidebar />
       <main className="flex-1 overflow-y-auto bg-background">
-        <div className="mx-auto max-w-5xl space-y-6 p-6">
+        <div className="mx-auto max-w-7xl space-y-6 p-6">
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-semibold">Archive</h1>
-            <LogoutButton />
+            <div className="flex items-center gap-4">
+              <Input
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-64"
+              />
+              <LogoutButton />
+            </div>
           </div>
 
           {error && (
@@ -99,15 +146,15 @@ export default function ArchivePage() {
             </div>
           )}
 
-          {todos.length === 0 ? (
+          {filteredTodos.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
-                <p>暂无归档的任务</p>
+                <p>{searchTerm ? "没有找到匹配的任务" : "暂无归档的任务"}</p>
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-4">
-              {todos.map((todo) => (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {filteredTodos.map((todo) => (
                 <Card key={todo.id}>
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
@@ -119,7 +166,7 @@ export default function ArchivePage() {
                   </CardHeader>
                   <CardContent>
                     {todo.subtasks.length > 0 && (
-                      <div className="space-y-1">
+                      <div className="space-y-1 mb-4">
                         {todo.subtasks.map((subtask) => (
                           <div
                             key={subtask.id}
@@ -145,6 +192,16 @@ export default function ArchivePage() {
                         ))}
                       </div>
                     )}
+                    <Button
+                      onClick={() => handleRestore(todo.id)}
+                      disabled={restoringTodoId === todo.id}
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                    >
+                      <RotateCcw className="h-4 w-4 mr-2" />
+                      {restoringTodoId === todo.id ? "恢复中..." : "Restore"}
+                    </Button>
                   </CardContent>
                 </Card>
               ))}
