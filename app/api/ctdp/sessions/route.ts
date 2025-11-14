@@ -8,6 +8,7 @@ type InsertBody = {
   waitSeconds: number;
   focusSeconds: number;
   note?: string;
+  subtaskIds?: string[]; // Array of subtask IDs that were selected for this session
 };
 
 export async function POST(request: Request) {
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
   const waitSeconds = Math.max(0, Number(body.waitSeconds) || 0);
   const focusSeconds = Math.max(1, Number(body.focusSeconds) || 0);
   const note = body.note?.trim();
+  const subtaskIds = body.subtaskIds ?? [];
 
   const { data: session, error: insertError } = await supabase
     .from("ctdp_focus_sessions")
@@ -52,6 +54,57 @@ export async function POST(request: Request) {
       { error: "Failed to write session", details: insertError?.message },
       { status: 500 },
     );
+  }
+
+  // Record time for each subtask
+  if (subtaskIds.length > 0 && focusSeconds > 0) {
+    // Distribute time equally among selected subtasks
+    const secondsPerSubtask = Math.floor(focusSeconds / subtaskIds.length);
+    
+    if (secondsPerSubtask > 0) {
+      // Insert subtask session records
+      const subtaskSessionRecords = subtaskIds.map((subtaskId) => ({
+        user_id: user.id,
+        subtask_id: subtaskId,
+        session_id: session.id,
+        seconds: secondsPerSubtask,
+      }));
+
+      const { error: subtaskSessionsError } = await supabase
+        .from("ctdp_subtask_sessions")
+        .insert(subtaskSessionRecords);
+
+      if (subtaskSessionsError) {
+        console.error("Error recording subtask sessions:", subtaskSessionsError);
+        // Don't fail the whole request, just log it
+      } else {
+        // Update total_seconds for each subtask
+        for (const subtaskId of subtaskIds) {
+          const { error: updateError } = await supabase.rpc("increment_subtask_time", {
+            subtask_id: subtaskId,
+            seconds_to_add: secondsPerSubtask,
+          });
+
+          if (updateError) {
+            // Fallback: direct update if RPC doesn't exist
+            const { data: currentSubtask } = await supabase
+              .from("ctdp_subtasks")
+              .select("total_seconds")
+              .eq("id", subtaskId)
+              .eq("user_id", user.id)
+              .single();
+
+            if (currentSubtask) {
+              await supabase
+                .from("ctdp_subtasks")
+                .update({ total_seconds: currentSubtask.total_seconds + secondsPerSubtask })
+                .eq("id", subtaskId)
+                .eq("user_id", user.id);
+            }
+          }
+        }
+      }
+    }
   }
 
   const { data: statsRows, error: statsError } = await supabase

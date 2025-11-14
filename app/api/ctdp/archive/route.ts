@@ -35,7 +35,7 @@ export async function GET() {
     const { data: subtasks, error: subtasksError } = todoIds.length > 0
       ? await supabase
           .from("ctdp_subtasks")
-          .select("id,todo_id,label,done")
+          .select("id,todo_id,label,done,total_seconds")
           .eq("user_id", user.id)
           .in("todo_id", todoIds)
       : { data: null, error: null };
@@ -47,7 +47,7 @@ export async function GET() {
     // Group subtasks by todo_id
     const subtasksByTodoId = new Map<
       string,
-      Array<{ id: string; todo_id: string; label: string; done: boolean }>
+      Array<{ id: string; todo_id: string; label: string; done: boolean; total_seconds: number }>
     >();
     if (subtasks) {
       for (const subtask of subtasks) {
@@ -67,6 +67,7 @@ export async function GET() {
             id: subtask.id,
             label: subtask.label,
             done: subtask.done,
+            totalSeconds: subtask.total_seconds ?? 0,
           })) ?? [],
       })),
     });

@@ -19,6 +19,7 @@ type Subtask = {
   id: string;
   label: string;
   done: boolean;
+  totalSeconds?: number;
 };
 
 type ArchivedTodo = {
@@ -170,24 +171,31 @@ export default function ArchivePage() {
                         {todo.subtasks.map((subtask) => (
                           <div
                             key={subtask.id}
-                            className="flex items-center gap-2 text-sm"
+                            className="flex items-center justify-between gap-2 text-sm"
                           >
-                            <CheckCircle2
-                              className={`h-4 w-4 ${
-                                subtask.done
-                                  ? "text-green-600"
-                                  : "text-muted-foreground"
-                              }`}
-                            />
-                            <span
-                              className={
-                                subtask.done
-                                  ? "text-muted-foreground line-through"
-                                  : ""
-                              }
-                            >
-                              {subtask.label}
-                            </span>
+                            <div className="flex items-center gap-2 flex-1">
+                              <CheckCircle2
+                                className={`h-4 w-4 ${
+                                  subtask.done
+                                    ? "text-green-600"
+                                    : "text-muted-foreground"
+                                }`}
+                              />
+                              <span
+                                className={
+                                  subtask.done
+                                    ? "text-muted-foreground line-through"
+                                    : ""
+                                }
+                              >
+                                {subtask.label}
+                              </span>
+                            </div>
+                            {subtask.totalSeconds !== undefined && (
+                              <span className="text-xs text-muted-foreground font-medium tabular-nums">
+                                {Math.floor(subtask.totalSeconds / 60)}m
+                              </span>
+                            )}
                           </div>
                         ))}
                       </div>

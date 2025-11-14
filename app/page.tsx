@@ -37,6 +37,7 @@ interface Subtask {
   id: string;
   label: string;
   done: boolean;
+  totalSeconds?: number;
 }
 
 interface Todo {
@@ -703,6 +704,9 @@ export default function Home() {
         .filter(Boolean)
         .join("; ");
 
+      // Collect all subtask IDs from selected tasks
+      const allSubtaskIds = focusSession.selectedTasks.flatMap((st) => st.subtaskIds);
+
       const response = await fetch("/api/ctdp/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -712,6 +716,7 @@ export default function Home() {
           waitSeconds: focusSession.waitSeconds,
           focusSeconds: focusSession.totalSeconds,
           note: celebrateNote,
+          subtaskIds: allSubtaskIds,
         }),
       });
       if (!response.ok) {
@@ -1204,6 +1209,11 @@ function TodoItem({
                     >
                       {subtask.label}
                     </span>
+                    {subtask.totalSeconds !== undefined && (
+                      <span className="text-xs text-muted-foreground font-medium tabular-nums">
+                        {Math.floor(subtask.totalSeconds / 60)}m
+                      </span>
+                    )}
                 <Button
                   size="sm"
                   variant="ghost"
