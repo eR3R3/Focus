@@ -31,6 +31,7 @@ import { ThemeSwitcher } from "@/components/theme-switcher";
 import { LogoutButton } from "@/components/logout-button";
 import { Sidebar } from "@/components/sidebar";
 import { LampContainer } from "@/components/ui/lamp";
+import { FullscreenTimer } from "@/components/fullscreen-timer";
 import { cn } from "@/lib/utils";
 
 interface Subtask {
@@ -72,7 +73,7 @@ const defaultStats: Stats = { nodes: 0, minutes: 0 };
 export default function Home() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [waitMinutes, setWaitMinutes] = useState<string>("12");
+  const [waitMinutes, setWaitMinutes] = useState<string>("0");
   const [focusMinutes, setFocusMinutes] = useState<string>("45");
   const [waitCountdown, setWaitCountdown] = useState<WaitCountdown | null>(
     null,
@@ -94,6 +95,10 @@ export default function Home() {
   const [showTaskSelector, setShowTaskSelector] = useState(false);
   const [fadingTodoId, setFadingTodoId] = useState<string | null>(null);
   const fadeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
+  const pauseStartTimeRef = useRef<number | null>(null);
+  const pausedDurationRef = useRef<number>(0);
+  const [timerMode, setTimerMode] = useState<"default" | "chill">("default");
 
   const filteredTodos = useMemo(() => {
     if (!searchTerm) return todos;
@@ -241,8 +246,9 @@ export default function Home() {
 
     const updateCountdown = () => {
       if (waitStartTimeRef.current === null || waitTotalSecondsRef.current === null) return;
+      if (isPaused) return; // Don't update if paused
       
-      const elapsed = Math.floor((Date.now() - waitStartTimeRef.current) / 1000);
+      const elapsed = Math.floor((Date.now() - waitStartTimeRef.current - pausedDurationRef.current) / 1000);
       const remaining = Math.max(0, waitTotalSecondsRef.current - elapsed);
       
       // Only update if the countdown ref still exists
@@ -283,24 +289,28 @@ export default function Home() {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [waitActive]);
+  }, [waitActive, isPaused]);
 
   useEffect(() => {
     if (!waitCountdown || waitCountdown.remainingSeconds > 0) return;
     const { selectedTasks, plannedFocusSeconds, totalSeconds } = waitCountdown;
+    
+    // Smooth transition: delay the state update slightly for smoother animation
+    setTimeout(() => {
     setWaitCountdown(null);
-    waitStartTimeRef.current = null;
-    waitTotalSecondsRef.current = null;
-    const now = Date.now();
-    focusStartTimeRef.current = now;
-    focusTotalSecondsRef.current = plannedFocusSeconds;
+      waitStartTimeRef.current = null;
+      waitTotalSecondsRef.current = null;
+      const now = Date.now();
+      focusStartTimeRef.current = now;
+      focusTotalSecondsRef.current = plannedFocusSeconds;
     setFocusSession({
-      selectedTasks,
+        selectedTasks,
       totalSeconds: plannedFocusSeconds,
       remainingSeconds: plannedFocusSeconds,
       waitSeconds: totalSeconds,
       status: "active",
     });
+    }, 100);
   }, [waitCountdown]);
 
   // Focus session timer with visibility API support
@@ -315,8 +325,9 @@ export default function Home() {
 
     const updateSession = () => {
       if (focusStartTimeRef.current === null || focusTotalSecondsRef.current === null) return;
+      if (isPaused) return; // Don't update if paused
       
-      const elapsed = Math.floor((Date.now() - focusStartTimeRef.current) / 1000);
+      const elapsed = Math.floor((Date.now() - focusStartTimeRef.current - pausedDurationRef.current) / 1000);
       const remaining = Math.max(0, focusTotalSecondsRef.current - elapsed);
       
       // Only update if the session ref still exists and is active
@@ -357,7 +368,7 @@ export default function Home() {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [focusActive]);
+  }, [focusActive, isPaused]);
 
   useEffect(() => {
     if (focusSession?.status === "completed") {
@@ -677,12 +688,42 @@ export default function Home() {
     focusTotalSecondsRef.current = null;
     setCelebrateNote("");
     setCelebrateOpen(false);
+    setIsPaused(false);
+    pauseStartTimeRef.current = null;
+    pausedDurationRef.current = 0;
   };
   const handleCompleteEarly = () => {
     if (!focusSession) return;
     setFocusSession((prev) =>
       prev ? { ...prev, remainingSeconds: 0, status: "completed" } : prev,
     );
+  };
+  const handlePause = () => {
+    if (waitCountdown) {
+      // Pause wait countdown
+      setIsPaused(true);
+      pauseStartTimeRef.current = Date.now();
+    } else if (focusSession) {
+      // Pause focus session
+      setIsPaused(true);
+      pauseStartTimeRef.current = Date.now();
+    }
+  };
+  const handleResume = () => {
+    if (isPaused && pauseStartTimeRef.current) {
+      const pausedTime = Date.now() - pauseStartTimeRef.current;
+      pausedDurationRef.current += pausedTime;
+      pauseStartTimeRef.current = null;
+      setIsPaused(false);
+      
+      // Adjust start time to account for paused duration
+      if (waitCountdown && waitStartTimeRef.current) {
+        waitStartTimeRef.current += pausedDurationRef.current;
+      } else if (focusSession && focusStartTimeRef.current) {
+        focusStartTimeRef.current += pausedDurationRef.current;
+      }
+      pausedDurationRef.current = 0;
+    }
   };
 
   const handleCelebrateSave = async () => {
@@ -707,6 +748,10 @@ export default function Home() {
       // Collect all subtask IDs from selected tasks
       const allSubtaskIds = focusSession.selectedTasks.flatMap((st) => st.subtaskIds);
 
+      // Calculate actual focus seconds (total planned - remaining)
+      // This handles both completed sessions and early completions
+      const actualFocusSeconds = Math.max(0, focusSession.totalSeconds - focusSession.remainingSeconds);
+
       const response = await fetch("/api/ctdp/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -714,7 +759,7 @@ export default function Home() {
           todoId: null,
           todoTitle: taskTitles || "Focus Session",
           waitSeconds: focusSession.waitSeconds,
-          focusSeconds: focusSession.totalSeconds,
+          focusSeconds: actualFocusSeconds,
           note: celebrateNote,
           subtaskIds: allSubtaskIds,
         }),
@@ -726,6 +771,9 @@ export default function Home() {
         stats: Stats;
       };
       setStats(payload.stats ?? defaultStats);
+      
+      // Reload dashboard to get updated subtask times
+      await loadDashboard();
     } catch (error) {
       console.error(error);
       alert("保存失败，请稍后再试。");
@@ -771,10 +819,32 @@ export default function Home() {
     0,
   );
 
+  const isFullscreen = Boolean(waitCountdown || focusSession);
+  const currentRemainingSeconds = waitCountdown 
+    ? waitCountdown.remainingSeconds 
+    : focusSession?.remainingSeconds ?? 0;
+  const currentWaitSeconds = waitCountdown?.totalSeconds ?? focusSession?.waitSeconds ?? 0;
+  const currentFocusSeconds = focusSession?.totalSeconds ?? waitCountdown?.plannedFocusSeconds ?? 0;
+
   return (
-    <div className="flex h-screen">
-      <Sidebar />
-      <main className="flex-1 overflow-y-auto bg-background">
+    <>
+      <FullscreenTimer
+        isVisible={isFullscreen}
+        mode={timerMode}
+        onModeChange={setTimerMode}
+        waitSeconds={currentWaitSeconds}
+        focusSeconds={currentFocusSeconds}
+        remainingSeconds={currentRemainingSeconds}
+        isWaitPhase={Boolean(waitCountdown)}
+        isActive={!isPaused && Boolean(waitCountdown || focusSession?.status === "active")}
+        onPause={handlePause}
+        onResume={handleResume}
+        onCancel={waitCountdown ? handleCancelWait : handleAbortSession}
+        onCompleteEarly={handleCompleteEarly}
+      />
+      <div className={`flex h-screen ${isFullscreen ? "hidden" : ""}`}>
+        <Sidebar />
+        <main className="flex-1 overflow-y-auto bg-background">
         <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8">
         {bootstrapState.error && todos.length === 0 && (
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -854,10 +924,10 @@ export default function Home() {
                       >
                         <TodoItem
                           todo={todo}
-                          onToggleSubtask={handleToggleSubtask}
-                          togglingSubtaskId={togglingSubtaskId}
-                          onAddSubtask={handleAddSubtask}
-                          pendingTodoId={subtaskPendingTodoId}
+              onToggleSubtask={handleToggleSubtask}
+              togglingSubtaskId={togglingSubtaskId}
+              onAddSubtask={handleAddSubtask}
+              pendingTodoId={subtaskPendingTodoId}
                           selectedTasks={selectedTasks}
                           onToggleTaskSelection={handleToggleTaskSelection}
                           onDeleteTodo={handleDeleteTodo}
@@ -1008,6 +1078,7 @@ export default function Home() {
         </div>
       </div>
       </main>
+      </div>
 
       <CelebrateModal
         open={celebrateOpen}
@@ -1016,8 +1087,8 @@ export default function Home() {
         onSave={handleCelebrateSave}
         onDismiss={handleCelebrateDismiss}
         focusSession={focusSession}
-            />
-          </div>
+      />
+    </>
   );
 }
 
@@ -1083,7 +1154,7 @@ function TodoItem({
       <div className="mb-2 flex items-center gap-2">
         {editingTodo ? (
           <>
-            <Input
+        <Input
               value={editingTodoTitle}
               onChange={(e) => setEditingTodoTitle(e.target.value)}
               onKeyDown={(e) => {
@@ -1103,7 +1174,7 @@ function TodoItem({
               onClick={handleSaveTodo}
             >
               <Check className="h-3 w-3" />
-            </Button>
+        </Button>
             <Button
               size="sm"
               variant="ghost"
@@ -1232,7 +1303,7 @@ function TodoItem({
                 </Button>
               </>
                 )}
-              </div>
+        </div>
         ))}
         <div className="flex gap-1.5 pt-1">
               <Input

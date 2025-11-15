@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   }
 
   const waitSeconds = Math.max(0, Number(body.waitSeconds) || 0);
-  const focusSeconds = Math.max(1, Number(body.focusSeconds) || 0);
+  const focusSeconds = Math.max(0, Number(body.focusSeconds) || 0);
   const note = body.note?.trim();
   const subtaskIds = body.subtaskIds ?? [];
 
@@ -80,26 +80,24 @@ export async function POST(request: Request) {
       } else {
         // Update total_seconds for each subtask
         for (const subtaskId of subtaskIds) {
-          const { error: updateError } = await supabase.rpc("increment_subtask_time", {
-            subtask_id: subtaskId,
-            seconds_to_add: secondsPerSubtask,
-          });
+          // Direct update (RPC might not exist)
+          const { data: currentSubtask } = await supabase
+            .from("ctdp_subtasks")
+            .select("total_seconds")
+            .eq("id", subtaskId)
+            .eq("user_id", user.id)
+            .single();
 
-          if (updateError) {
-            // Fallback: direct update if RPC doesn't exist
-            const { data: currentSubtask } = await supabase
+          if (currentSubtask) {
+            const newTotalSeconds = (currentSubtask.total_seconds ?? 0) + secondsPerSubtask;
+            const { error: updateError } = await supabase
               .from("ctdp_subtasks")
-              .select("total_seconds")
+              .update({ total_seconds: newTotalSeconds })
               .eq("id", subtaskId)
-              .eq("user_id", user.id)
-              .single();
+              .eq("user_id", user.id);
 
-            if (currentSubtask) {
-              await supabase
-                .from("ctdp_subtasks")
-                .update({ total_seconds: currentSubtask.total_seconds + secondsPerSubtask })
-                .eq("id", subtaskId)
-                .eq("user_id", user.id);
+            if (updateError) {
+              console.error(`Error updating subtask ${subtaskId}:`, updateError);
             }
           }
         }
