@@ -14,6 +14,7 @@ import {
   Trash2,
   X,
   Check,
+  RotateCcw,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -29,10 +30,19 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { LogoutButton } from "@/components/logout-button";
-import { Sidebar } from "@/components/sidebar";
+import { ImmersiveLayout } from "@/components/immersive-layout";
 import { LampContainer } from "@/components/ui/lamp";
 import { FullscreenTimer } from "@/components/fullscreen-timer";
 import { cn } from "@/lib/utils";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 
 interface Subtask {
   id: string;
@@ -99,6 +109,18 @@ export default function Home() {
   const pauseStartTimeRef = useRef<number | null>(null);
   const pausedDurationRef = useRef<number>(0);
   const [timerMode, setTimerMode] = useState<"default" | "chill">("default");
+  const [currentView, setCurrentView] = useState<"tasks" | "stats" | "archive">("tasks");
+  const [archiveTodos, setArchiveTodos] = useState<Array<{ id: string; title: string; archivedAt: string; subtasks: Subtask[] }>>([]);
+  const [archiveSearchTerm, setArchiveSearchTerm] = useState("");
+  const [restoringTodoId, setRestoringTodoId] = useState<string | null>(null);
+  const [statsData, setStatsData] = useState<{
+    hourly: Array<{ hour: number; interval: string; sessions: number; minutes: number }>;
+    todayTotals: { sessions: number; minutes: number };
+    daily: Array<{ date: string; day: string; sessions: number; hours: number }>;
+    totals: { sessions: number; minutes: number };
+  } | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [archiveLoading, setArchiveLoading] = useState(false);
 
   const filteredTodos = useMemo(() => {
     if (!searchTerm) return todos;
@@ -155,6 +177,97 @@ export default function Home() {
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
+
+  // Load stats when switching to stats view
+  useEffect(() => {
+    if (currentView === "stats" && !statsData) {
+      loadStats();
+    }
+  }, [currentView, statsData]);
+
+  // Load archive when switching to archive view
+  useEffect(() => {
+    if (currentView === "archive" && archiveTodos.length === 0) {
+      loadArchive();
+    }
+  }, [currentView, archiveTodos.length]);
+
+  const loadStats = useCallback(async () => {
+    setStatsLoading(true);
+    try {
+      const response = await fetch("/api/ctdp/stats");
+      if (response.status === 401) {
+        return;
+      }
+      if (!response.ok) {
+        throw new Error("Failed to load stats");
+      }
+      const data = (await response.json()) as typeof statsData;
+      setStatsData(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
+
+  const loadArchive = useCallback(async () => {
+    setArchiveLoading(true);
+    try {
+      const response = await fetch("/api/ctdp/archive");
+      if (response.status === 401) {
+        return;
+      }
+      if (!response.ok) {
+        throw new Error("Failed to load archive");
+      }
+      const payload = (await response.json()) as { todos: typeof archiveTodos };
+      setArchiveTodos(payload.todos ?? []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setArchiveLoading(false);
+    }
+  }, []);
+
+  const formatArchivedDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    return `${month}月${day}日`;
+  };
+
+  const handleRestore = async (todoId: string) => {
+    setRestoringTodoId(todoId);
+    try {
+      const response = await fetch("/api/ctdp/archive/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ todoId }),
+      });
+      if (!response.ok) {
+        throw new Error("Failed to restore todo");
+      }
+      setArchiveTodos((prev) => prev.filter((todo) => todo.id !== todoId));
+      await loadDashboard();
+      setCurrentView("tasks");
+    } catch (err) {
+      console.error(err);
+      alert("恢复任务失败，请稍后再试。");
+    } finally {
+      setRestoringTodoId(null);
+    }
+  };
+
+  const filteredArchiveTodos = useMemo(() => {
+    if (!archiveSearchTerm) return archiveTodos;
+    return archiveTodos.filter((todo) =>
+      todo.title.toLowerCase().includes(archiveSearchTerm.toLowerCase()) ||
+      todo.subtasks.some((subtask) =>
+        subtask.label.toLowerCase().includes(archiveSearchTerm.toLowerCase())
+      )
+    );
+  }, [archiveTodos, archiveSearchTerm]);
 
   // Auto-archive completed tasks after midnight
   const checkAndArchive = useCallback(async () => {
@@ -647,6 +760,8 @@ export default function Home() {
   const handleSchedule = () => {
     if (selectedTasks.length === 0 || waitCountdown || focusSession?.status === "active")
       return;
+    // Set timer mode to chill when starting
+    setTimerMode("chill");
     const waitMinutesNum = Math.max(0, Number(waitMinutes) || 0);
     const focusMinutesNum = Math.max(0, Number(focusMinutes) || 0);
     const waitSeconds = waitMinutesNum * 60;
@@ -842,243 +957,459 @@ export default function Home() {
         onCancel={waitCountdown ? handleCancelWait : handleAbortSession}
         onCompleteEarly={handleCompleteEarly}
       />
-      <div className={`flex h-screen ${isFullscreen ? "hidden" : ""}`}>
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto bg-background">
-        <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8">
+      {!isFullscreen && (
+        <ImmersiveLayout currentView={currentView} onViewChange={setCurrentView}>
+          <div className="min-h-screen">
+            <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 pt-24">
         {bootstrapState.error && todos.length === 0 && (
-          <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                <motion.div
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-3 text-sm text-red-200 backdrop-blur-md"
+                >
             {bootstrapState.error}
             <Button
               variant="ghost"
-              className="ml-3 h-8 px-3 text-destructive"
+                    className="ml-3 h-8 px-3 text-red-200 hover:text-red-100"
               onClick={loadDashboard}
             >
               重新加载
             </Button>
-          </div>
-        )}
+                </motion.div>
+              )}
 
-        <header className="flex items-center justify-between">
-              <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Tasks</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {stats.nodes} sessions · {stats.minutes} minutes
+              {currentView === "tasks" && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="space-y-6"
+                >
+                  <div className="text-center">
+                    <h1 className="text-4xl font-bold text-white mb-2">Tasks</h1>
+                    <p className="text-white/70">
+                      {stats.nodes} sessions · {stats.minutes} minutes
                 </p>
               </div>
-          <div className="flex items-center gap-2">
-              <ThemeSwitcher />
-            <LogoutButton />
-            </div>
-        </header>
 
-        <div className="grid gap-6 lg:grid-cols-[1fr_400px]">
-          <div className="space-y-4">
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="New task..."
-                    value={newTodoTitle}
-                    onChange={(e) => setNewTodoTitle(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        handleCreateTodo();
-                      }
-                    }}
-                    className="flex-1"
-                  />
-                  <Button
-                    onClick={handleCreateTodo}
-                    disabled={creatingTodo || !newTodoTitle.trim()}
-                    size="sm"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-4">
-                <Input
-                  placeholder="Search..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="mb-4"
-                />
-                <div className="space-y-2">
-                  {filteredTodos.length === 0 && (
-                    <p className="py-8 text-center text-sm text-muted-foreground">
-                      No tasks yet
-                    </p>
-                  )}
-                  <AnimatePresence>
-                    {filteredTodos.map((todo) => (
+                  <div className="grid gap-6 lg:grid-cols-[1fr_400px]">
+                    <div className="space-y-4">
                       <motion.div
-                        key={todo.id}
-                        initial={{ opacity: 1 }}
-                        animate={{ opacity: fadingTodoId === todo.id ? 0 : 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 3, ease: "easeOut" }}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="bg-black/40 backdrop-blur-md rounded-xl border border-white/10 p-4"
                       >
-                        <TodoItem
-                          todo={todo}
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="New task..."
+                            value={newTodoTitle}
+                            onChange={(e) => setNewTodoTitle(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                handleCreateTodo();
+                              }
+                            }}
+                            className="flex-1 bg-white/10 border-white/20 text-white placeholder:text-white/50"
+                          />
+                          <Button
+                            onClick={handleCreateTodo}
+                            disabled={creatingTodo || !newTodoTitle.trim()}
+                            size="sm"
+                            className="bg-white/20 hover:bg-white/30 text-white"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </motion.div>
+
+                      <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.1 }}
+                        className="bg-black/40 backdrop-blur-md rounded-xl border border-white/10 p-4"
+                      >
+                        <Input
+                          placeholder="Search..."
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          className="mb-4 bg-white/10 border-white/20 text-white placeholder:text-white/50"
+                        />
+                        <div className="space-y-2">
+                          {filteredTodos.length === 0 && (
+                            <p className="py-8 text-center text-sm text-white/50">
+                              No tasks yet
+                            </p>
+                          )}
+                          <AnimatePresence>
+                            {filteredTodos.map((todo) => (
+                              <motion.div
+                                key={todo.id}
+                                initial={{ opacity: 1 }}
+                                animate={{ opacity: fadingTodoId === todo.id ? 0 : 1 }}
+                                exit={{ opacity: 0 }}
+                                transition={{ duration: 3, ease: "easeOut" }}
+                              >
+                                <TodoItem
+                                  todo={todo}
               onToggleSubtask={handleToggleSubtask}
               togglingSubtaskId={togglingSubtaskId}
               onAddSubtask={handleAddSubtask}
               pendingTodoId={subtaskPendingTodoId}
-                          selectedTasks={selectedTasks}
-                          onToggleTaskSelection={handleToggleTaskSelection}
-                          onDeleteTodo={handleDeleteTodo}
-                          onUpdateTodo={handleUpdateTodo}
-                          onDeleteSubtask={handleDeleteSubtask}
-                          onUpdateSubtask={handleUpdateSubtask}
-                        />
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-          </div>
-              </CardContent>
-            </Card>
-
-          </div>
-
-          <div className="space-y-4">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Schedule</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">
-                      Wait (min)
-                    </label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={waitMinutes}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        // Allow empty string, negative sign, or valid numbers
-                        if (value === "" || value === "-" || /^-?\d*\.?\d*$/.test(value)) {
-                          setWaitMinutes(value);
-                        }
-                      }}
-                      onBlur={(e) => {
-                        // On blur, ensure we have a valid number, default to 0 if empty
-                        const num = Number(e.target.value);
-                        if (isNaN(num) || num < 0) {
-                          setWaitMinutes("0");
-                        } else {
-                          setWaitMinutes(String(Math.floor(num)));
-                        }
-                      }}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">
-                      Focus (min)
-                    </label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={focusMinutes}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        // Allow empty string, negative sign, or valid numbers
-                        if (value === "" || value === "-" || /^-?\d*\.?\d*$/.test(value)) {
-                          setFocusMinutes(value);
-                        }
-                      }}
-                      onBlur={(e) => {
-                        // On blur, ensure we have a valid number, default to 0 if empty
-                        const num = Number(e.target.value);
-                        if (isNaN(num) || num < 0) {
-                          setFocusMinutes("0");
-                        } else {
-                          setFocusMinutes(String(Math.floor(num)));
-                        }
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <Button
-                  onClick={() => setShowTaskSelector(!showTaskSelector)}
-                  variant="outline"
-                  className="w-full"
-                >
-                  {selectedTasksCount > 0
-                    ? `${selectedTasksCount} task${selectedTasksCount > 1 ? "s" : ""} selected`
-                    : "Select tasks"}
-                </Button>
-
-                {showTaskSelector && (
-                  <div className="space-y-2 rounded-lg border border-border bg-secondary/30 p-3">
-                    {todos.map((todo) =>
-                      todo.subtasks.length > 0 ? (
-                        <div key={todo.id} className="space-y-1.5">
-                          <p className="text-sm font-medium">{todo.title}</p>
-                          {todo.subtasks.map((subtask) => {
-                            const isSelected = selectedTasks
-                              .find((st) => st.todoId === todo.id)
-                              ?.subtaskIds.includes(subtask.id);
-                            return (
-                              <label
-                                key={subtask.id}
-                                className="flex items-center gap-2 rounded px-2 py-1 hover:bg-background/50"
-                              >
-                                <Checkbox
-                                  checked={isSelected}
-                                  onCheckedChange={() =>
-                                    handleToggleTaskSelection(todo.id, subtask.id)
-                                  }
+                                  selectedTasks={selectedTasks}
+                                  onToggleTaskSelection={handleToggleTaskSelection}
+                                  onDeleteTodo={handleDeleteTodo}
+                                  onUpdateTodo={handleUpdateTodo}
+                                  onDeleteSubtask={handleDeleteSubtask}
+                                  onUpdateSubtask={handleUpdateSubtask}
                                 />
-                                <span className="text-sm">{subtask.label}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      ) : null,
-                    )}
-                    {todos.every((t) => t.subtasks.length === 0) && (
-                      <p className="py-4 text-center text-sm text-muted-foreground">
-                        Add subtasks to tasks first
-                      </p>
-                    )}
+                              </motion.div>
+                            ))}
+                          </AnimatePresence>
+          </div>
+                      </motion.div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.2 }}
+                        className="bg-black/40 backdrop-blur-md rounded-xl border border-white/10 p-4"
+                      >
+                        <h3 className="text-lg font-semibold text-white mb-4">Schedule</h3>
+                        <div className="space-y-4">
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="space-y-1.5">
+                              <label className="text-xs text-white/70">
+                                Wait (min)
+                    </label>
+                    <Input
+                      type="number"
+                                min={0}
+                      value={waitMinutes}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  if (value === "" || value === "-" || /^-?\d*\.?\d*$/.test(value)) {
+                                    setWaitMinutes(value);
+                                  }
+                                }}
+                                onBlur={(e) => {
+                                  const num = Number(e.target.value);
+                                  if (isNaN(num) || num < 0) {
+                                    setWaitMinutes("0");
+                                  } else {
+                                    setWaitMinutes(String(Math.floor(num)));
+                                  }
+                                }}
+                                className="bg-white/10 border-white/20 text-white"
+                    />
+                  </div>
+                            <div className="space-y-1.5">
+                              <label className="text-xs text-white/70">
+                                Focus (min)
+                    </label>
+                    <Input
+                      type="number"
+                                min={0}
+                      value={focusMinutes}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  if (value === "" || value === "-" || /^-?\d*\.?\d*$/.test(value)) {
+                                    setFocusMinutes(value);
+                                  }
+                                }}
+                                onBlur={(e) => {
+                                  const num = Number(e.target.value);
+                                  if (isNaN(num) || num < 0) {
+                                    setFocusMinutes("0");
+                                  } else {
+                                    setFocusMinutes(String(Math.floor(num)));
+                                  }
+                                }}
+                                className="bg-white/10 border-white/20 text-white"
+                    />
+                  </div>
                 </div>
-                )}
+
+                          <Button
+                            onClick={() => setShowTaskSelector(!showTaskSelector)}
+                            variant="outline"
+                            className="w-full bg-white/10 border-white/20 text-white hover:bg-white/20"
+                          >
+                            {selectedTasksCount > 0
+                              ? `${selectedTasksCount} task${selectedTasksCount > 1 ? "s" : ""} selected`
+                              : "Select tasks"}
+                          </Button>
+
+                          {showTaskSelector && (
+                            <div className="space-y-2 rounded-lg border border-white/20 bg-white/10 p-3">
+                              {todos.map((todo) =>
+                                todo.subtasks.length > 0 ? (
+                                  <div key={todo.id} className="space-y-1.5">
+                                    <p className="text-sm font-medium text-white">{todo.title}</p>
+                                    {todo.subtasks.map((subtask) => {
+                                      const isSelected = selectedTasks
+                                        .find((st) => st.todoId === todo.id)
+                                        ?.subtaskIds.includes(subtask.id);
+                                      return (
+                                        <label
+                                          key={subtask.id}
+                                          className="flex items-center gap-2 rounded px-2 py-1 hover:bg-white/10"
+                                        >
+                                          <Checkbox
+                                            checked={isSelected}
+                                            onCheckedChange={() =>
+                                              handleToggleTaskSelection(todo.id, subtask.id)
+                                            }
+                                          />
+                                          <span className="text-sm text-white">{subtask.label}</span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                ) : null,
+                              )}
+                              {todos.every((t) => t.subtasks.length === 0) && (
+                                <p className="py-4 text-center text-sm text-white/50">
+                                  Add subtasks to tasks first
+                                </p>
+                              )}
+                </div>
+                          )}
 
                 <Button
                   onClick={handleSchedule}
                   disabled={schedulingDisabled}
-                  className="w-full"
+                            className="w-full bg-white/20 hover:bg-white/30 text-white"
                 >
-                  <Clock className="h-4 w-4" />
-                  Start
+                            <Clock className="h-4 w-4" />
+                            Start
                 </Button>
-              </CardContent>
-            </Card>
+                        </div>
+                      </motion.div>
 
-            <WaitCountdownCard
-              countdown={waitCountdown}
-              onCancel={handleCancelWait}
-              todos={todos}
-            />
+                      <WaitCountdownCard
+                        countdown={waitCountdown}
+                        onCancel={handleCancelWait}
+                        todos={todos}
+                      />
 
             <TimerRingCard
               focusSession={focusSession}
-              todos={todos}
+                        todos={todos}
               onAbort={handleAbortSession}
               onComplete={handleCompleteEarly}
             />
           </div>
         </div>
+                </motion.div>
+              )}
+
+              {currentView === "stats" && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="space-y-6"
+                >
+                  <div className="text-center">
+                    <h1 className="text-4xl font-bold text-white mb-2">Stats</h1>
+                  </div>
+                  {statsLoading ? (
+                    <div className="text-center text-white/70">Loading...</div>
+                  ) : statsData ? (
+                    <>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <motion.div
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="bg-black/40 backdrop-blur-md rounded-xl border border-white/10 p-4"
+                        >
+                          <h3 className="text-base font-semibold text-white mb-2">Today's Sessions</h3>
+                          <p className="text-3xl font-semibold text-white">{statsData.todayTotals.sessions}</p>
+                          <p className="mt-1 text-sm text-white/70">Today</p>
+                        </motion.div>
+                        <motion.div
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.1 }}
+                          className="bg-black/40 backdrop-blur-md rounded-xl border border-white/10 p-4"
+                        >
+                          <h3 className="text-base font-semibold text-white mb-2">Today's Focus Time</h3>
+                          <p className="text-3xl font-semibold text-white">{statsData.todayTotals.minutes}</p>
+                          <p className="mt-1 text-sm text-white/70">Minutes</p>
+                        </motion.div>
       </div>
-      </main>
-      </div>
+
+                      <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.2 }}
+                        className="bg-black/40 backdrop-blur-md rounded-xl border border-white/10 p-4"
+                      >
+                        <h3 className="text-base font-semibold text-white mb-4">Today's Focus Time</h3>
+                        <ResponsiveContainer width="100%" height={300}>
+                          <BarChart data={statsData.hourly}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                            <XAxis
+                              dataKey="interval"
+                              stroke="rgba(255,255,255,0.7)"
+                              fontSize={10}
+                              angle={-45}
+                              textAnchor="end"
+                              height={80}
+                            />
+                            <YAxis stroke="rgba(255,255,255,0.7)" fontSize={12} />
+                            <Tooltip
+                              contentStyle={{
+                                backgroundColor: "rgba(0,0,0,0.8)",
+                                border: "1px solid rgba(255,255,255,0.2)",
+                                borderRadius: "0.5rem",
+                                color: "white",
+                              }}
+                              formatter={(value: number) => [`${value} min`, "Focus Time"]}
+                            />
+                            <Bar dataKey="minutes" fill="rgba(255,255,255,0.8)" radius={[8, 8, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </motion.div>
+
+                      <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.3 }}
+                        className="bg-black/40 backdrop-blur-md rounded-xl border border-white/10 p-4"
+                      >
+                        <h3 className="text-base font-semibold text-white mb-4">Weekly Focus Hours</h3>
+                        <ResponsiveContainer width="100%" height={300}>
+                          <BarChart data={statsData.daily}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                            <XAxis
+                              dataKey="day"
+                              stroke="rgba(255,255,255,0.7)"
+                              fontSize={12}
+                            />
+                            <YAxis stroke="rgba(255,255,255,0.7)" fontSize={12} />
+                            <Tooltip
+                              contentStyle={{
+                                backgroundColor: "rgba(0,0,0,0.8)",
+                                border: "1px solid rgba(255,255,255,0.2)",
+                                borderRadius: "0.5rem",
+                                color: "white",
+                              }}
+                              formatter={(value: number) => [`${value} hrs`, "Focus Time"]}
+                            />
+                            <Bar dataKey="hours" fill="rgba(255,255,255,0.8)" radius={[8, 8, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </motion.div>
+                    </>
+                  ) : (
+                    <div className="text-center text-white/70">Failed to load stats</div>
+                  )}
+                </motion.div>
+              )}
+
+              {currentView === "archive" && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="space-y-6"
+                >
+                  <div className="text-center">
+                    <h1 className="text-4xl font-bold text-white mb-2">Archive</h1>
+    </div>
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-black/40 backdrop-blur-md rounded-xl border border-white/10 p-4"
+                  >
+                    <Input
+                      placeholder="Search..."
+                      value={archiveSearchTerm}
+                      onChange={(e) => setArchiveSearchTerm(e.target.value)}
+                      className="bg-white/10 border-white/20 text-white placeholder:text-white/50"
+                    />
+                  </motion.div>
+                  {archiveLoading ? (
+                    <div className="text-center text-white/70">Loading...</div>
+                  ) : filteredArchiveTodos.length === 0 ? (
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-black/40 backdrop-blur-md rounded-xl border border-white/10 p-12 text-center"
+                    >
+                      <p className="text-white/70">
+                        {archiveSearchTerm ? "没有找到匹配的任务" : "No archived tasks"}
+                      </p>
+                    </motion.div>
+                  ) : (
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                      {filteredArchiveTodos.map((todo) => (
+                        <motion.div
+              key={todo.id}
+                          initial={{ opacity: 0, scale: 0.9 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="bg-black/40 backdrop-blur-md rounded-xl border border-white/10 p-4"
+                        >
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-base font-semibold text-white">{todo.title}</h3>
+                            <span className="text-sm text-white/70">
+                              {formatArchivedDate(todo.archivedAt)}
+                            </span>
+                </div>
+                          {todo.subtasks.length > 0 && (
+                            <div className="space-y-1 mb-4">
+                {todo.subtasks.map((subtask) => (
+                                <div
+                    key={subtask.id}
+                                  className="flex items-center justify-between gap-2 text-sm"
+                                >
+                                  <div className="flex items-center gap-2 flex-1">
+                                    <CheckCircle2
+                                      className={`h-4 w-4 ${
+                                        subtask.done
+                                          ? "text-green-400"
+                                          : "text-white/50"
+                                      }`}
+                    />
+                    <span
+                                      className={
+                                        subtask.done
+                                          ? "text-white/50 line-through"
+                                          : "text-white"
+                                      }
+                    >
+                      {subtask.label}
+                    </span>
+                                  </div>
+                                  {subtask.totalSeconds !== undefined && (
+                                    <span className="text-xs text-white/70 font-medium tabular-nums">
+                                      {Math.floor(subtask.totalSeconds / 60)}m
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <Button
+                            onClick={() => handleRestore(todo.id)}
+                            disabled={restoringTodoId === todo.id}
+                            variant="outline"
+                            size="sm"
+                            className="w-full bg-white/10 border-white/20 text-white hover:bg-white/20"
+                          >
+                            <RotateCcw className="h-4 w-4 mr-2" />
+                            {restoringTodoId === todo.id ? "恢复中..." : "Restore"}
+                          </Button>
+                        </motion.div>
+                      ))}
+              </div>
+                  )}
+                </motion.div>
+              )}
+            </div>
+          </div>
+        </ImmersiveLayout>
+      )}
 
       <CelebrateModal
         open={celebrateOpen}
@@ -1150,7 +1481,7 @@ function TodoItem({
   };
 
   return (
-    <div className="rounded-lg border border-border bg-card p-3">
+    <div className="rounded-lg border border-white/20 bg-black/30 backdrop-blur-md p-3 mb-2">
       <div className="mb-2 flex items-center gap-2">
         {editingTodo ? (
           <>
@@ -1164,13 +1495,13 @@ function TodoItem({
                   setEditingTodoTitle(todo.title);
                 }
               }}
-              className="h-7 flex-1 text-sm"
+              className="h-7 flex-1 text-sm bg-white/10 border-white/20 text-white"
               autoFocus
             />
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 w-7 p-0"
+              className="h-7 w-7 p-0 text-white hover:bg-white/20"
               onClick={handleSaveTodo}
             >
               <Check className="h-3 w-3" />
@@ -1178,7 +1509,7 @@ function TodoItem({
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 w-7 p-0"
+              className="h-7 w-7 p-0 text-white hover:bg-white/20"
               onClick={() => {
                 setEditingTodo(false);
                 setEditingTodoTitle(todo.title);
@@ -1190,7 +1521,7 @@ function TodoItem({
         ) : (
           <>
             <p 
-              className="flex-1 text-sm font-medium cursor-pointer select-none"
+              className="flex-1 text-sm font-medium cursor-pointer select-none text-white"
               onDoubleClick={() => {
                 setEditingTodo(true);
                 setEditingTodoTitle(todo.title);
@@ -1201,7 +1532,7 @@ function TodoItem({
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 w-7 p-0"
+              className="h-7 w-7 p-0 text-white/70 hover:text-white hover:bg-white/20"
               onClick={() => {
                 setEditingTodo(true);
                 setEditingTodoTitle(todo.title);
@@ -1212,7 +1543,7 @@ function TodoItem({
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+              className="h-7 w-7 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/20"
               onClick={(e) => {
                 e.stopPropagation();
                 onDeleteTodo(todo.id);
@@ -1227,7 +1558,7 @@ function TodoItem({
                 {todo.subtasks.map((subtask) => (
           <div
                     key={subtask.id}
-            className="group flex items-center gap-2 rounded px-1.5 py-1 hover:bg-secondary/50"
+            className="group flex items-center gap-2 rounded px-1.5 py-1 hover:bg-white/10"
                   >
                     <Checkbox
                       checked={subtask.done}
@@ -1246,13 +1577,13 @@ function TodoItem({
                       setEditingSubtaskLabel("");
                     }
                   }}
-                  className="h-7 flex-1 text-sm"
+                  className="h-7 flex-1 text-sm bg-white/10 border-white/20 text-white"
                   autoFocus
                 />
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-7 w-7 p-0"
+                  className="h-7 w-7 p-0 text-white hover:bg-white/20"
                   onClick={() => handleSaveSubtask(subtask.id)}
                 >
                   <Check className="h-3 w-3" />
@@ -1260,7 +1591,7 @@ function TodoItem({
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-7 w-7 p-0"
+                  className="h-7 w-7 p-0 text-white hover:bg-white/20"
                   onClick={() => {
                     setEditingSubtaskId(null);
                     setEditingSubtaskLabel("");
@@ -1272,23 +1603,23 @@ function TodoItem({
             ) : (
               <>
                     <span
-                      className={cn(
-                    "flex-1 text-sm cursor-pointer select-none",
-                        subtask.done && "text-muted-foreground line-through",
+              className={cn(
+                    "flex-1 text-sm cursor-pointer select-none text-white",
+                        subtask.done && "text-white/50 line-through",
                       )}
                       onDoubleClick={() => handleStartEditSubtask(subtask)}
                     >
                       {subtask.label}
                     </span>
                     {subtask.totalSeconds !== undefined && (
-                      <span className="text-xs text-muted-foreground font-medium tabular-nums">
+                      <span className="text-xs text-white/70 font-medium tabular-nums">
                         {Math.floor(subtask.totalSeconds / 60)}m
                       </span>
                     )}
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="h-6 w-6 p-0 text-white/70 hover:text-white hover:bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity"
                   onClick={() => handleStartEditSubtask(subtask)}
                 >
                   <Edit className="h-3 w-3" />
@@ -1296,7 +1627,7 @@ function TodoItem({
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-6 w-6 p-0 text-destructive hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="h-6 w-6 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/20 opacity-0 group-hover:opacity-100 transition-opacity"
                   onClick={() => onDeleteSubtask(todo.id, subtask.id)}
                 >
                   <Trash2 className="h-3 w-3" />
@@ -1316,7 +1647,7 @@ function TodoItem({
                     handleAdd();
                   }
                 }}
-            className="h-8 text-sm"
+            className="h-8 text-sm bg-white/10 border-white/20 text-white placeholder:text-white/50"
             disabled={pendingTodoId === todo.id}
               />
               <Button
@@ -1324,7 +1655,7 @@ function TodoItem({
             variant="ghost"
                 onClick={handleAdd}
             disabled={pendingTodoId === todo.id || !newSubtask.trim()}
-            className="h-8 px-2"
+            className="h-8 px-2 text-white hover:bg-white/20"
               >
             <Plus className="h-3 w-3" />
               </Button>
