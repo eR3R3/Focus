@@ -29,9 +29,10 @@ const musicUrls: Record<string, string> = {
 interface MediaControlsProps {
   isActive?: boolean; // For timer - only play when timer is active
   onBackgroundChange?: (background: { url: string; type: "gif" | "mp4" }) => void;
+  position?: "bottom-left" | "inline"; // Position of the controls
 }
 
-export function MediaControls({ isActive = true, onBackgroundChange }: MediaControlsProps) {
+export function MediaControls({ isActive = true, onBackgroundChange, position = "bottom-left" }: MediaControlsProps) {
   const [selectedMusic, setSelectedMusic] = useState<string>("rain");
   const [selectedBackground, setSelectedBackground] = useState<string>("forest");
   const [isPlaying, setIsPlaying] = useState(false);
@@ -103,72 +104,80 @@ export function MediaControls({ isActive = true, onBackgroundChange }: MediaCont
   const currentBg = backgroundMedia[selectedBackground];
   const isAnimated = currentBg?.type === "gif" || currentBg?.type === "mp4";
 
+  const containerClass = position === "inline" 
+    ? "flex flex-row gap-2" 
+    : "fixed bottom-4 left-4 z-50 flex flex-col gap-2";
+
+  const menuPositionClass = position === "inline"
+    ? "absolute top-full left-0 mt-2"
+    : "absolute bottom-full left-0 mb-2";
+
   return (
-    <div className="fixed bottom-4 left-4 z-50 flex flex-col gap-2">
+    <div className={containerClass}>
       {/* Music Control */}
-      <div className="relative">
-        <motion.div
+      <div className="relative flex items-center gap-2">
+        {/* Play/Pause Toggle Button */}
+        <motion.button
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="bg-black/40 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl p-2 flex items-center gap-2"
+          onClick={toggleMusic}
+          className={cn(
+            "px-3 py-3 rounded-xl transition-all duration-200 flex items-center justify-center relative overflow-hidden",
+            isPlaying
+              ? "bg-white text-black"
+              : "text-white/70 hover:text-white hover:bg-white/10"
+          )}
+          title={isPlaying ? "Pause sound" : "Play sound"}
         >
-          {/* Play/Pause Toggle Button */}
-          <button
-            onClick={toggleMusic}
-            className={cn(
-              "px-3 py-3 rounded-xl transition-all duration-200 flex items-center justify-center relative overflow-hidden",
-              isPlaying
-                ? "bg-white text-black"
-                : "text-white/70 hover:text-white hover:bg-white/10"
+          {isPlaying && (
+            <motion.div
+              layoutId="activePlayButton"
+              className="absolute inset-0 bg-white rounded-xl"
+              transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+            />
+          )}
+          <span className="relative z-10">
+            {isPlaying ? (
+              <Volume2 className="h-4 w-4" />
+            ) : (
+              <Music className="h-4 w-4" />
             )}
-            title={isPlaying ? "Pause sound" : "Play sound"}
-          >
-            {isPlaying && (
-              <motion.div
-                layoutId="activePlayButton"
-                className="absolute inset-0 bg-white rounded-xl"
-                transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-              />
-            )}
-            <span className="relative z-10">
-              {isPlaying ? (
-                <Volume2 className="h-4 w-4" />
-              ) : (
-                <Music className="h-4 w-4" />
-              )}
-            </span>
-          </button>
+          </span>
+        </motion.button>
 
-          {/* Music Selection Button */}
-          <button
-            onClick={() => setShowMusicMenu(!showMusicMenu)}
-            className={cn(
-              "flex-1 px-4 py-3 rounded-xl transition-all duration-200 flex items-center gap-2 relative overflow-hidden",
-              showMusicMenu
-                ? "bg-white text-black"
-                : "text-white/70 hover:text-white hover:bg-white/10"
-            )}
-          >
-            {showMusicMenu && (
-              <motion.div
-                layoutId="activeMusicButton"
-                className="absolute inset-0 bg-white rounded-xl"
-                transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-              />
-            )}
-            <span className="relative z-10 text-sm font-medium whitespace-nowrap">
-              {musicOptions.find((m) => m.value === selectedMusic)?.label || "Music"}
-            </span>
-          </button>
-        </motion.div>
+        {/* Music Selection Button */}
+        <motion.button
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.05 }}
+          onClick={() => setShowMusicMenu(!showMusicMenu)}
+          className={cn(
+            position === "inline" ? "px-4 py-3" : "px-4 py-3",
+            "rounded-xl transition-all duration-200 flex items-center gap-2 relative overflow-hidden",
+            showMusicMenu
+              ? "bg-white text-black"
+              : "text-white/70 hover:text-white hover:bg-white/10"
+          )}
+        >
+          {showMusicMenu && (
+            <motion.div
+              layoutId="activeMusicButton"
+              className="absolute inset-0 bg-white rounded-xl"
+              transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+            />
+          )}
+          <span className="relative z-10 text-sm font-medium whitespace-nowrap">
+            {musicOptions.find((m) => m.value === selectedMusic)?.label || "Music"}
+          </span>
+        </motion.button>
 
         <AnimatePresence>
           {showMusicMenu && (
             <motion.div
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: position === "inline" ? -10 : 10 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 10 }}
-              className="absolute bottom-full left-0 mb-2 bg-black/40 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl p-2 min-w-[200px]"
+              exit={{ opacity: 0, y: position === "inline" ? -10 : 10 }}
+              className={cn(menuPositionClass, "bg-black/40 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl p-2 min-w-[200px]")}
             >
               <div className="space-y-1">
                 {musicOptions.map((option) => (
@@ -206,56 +215,53 @@ export function MediaControls({ isActive = true, onBackgroundChange }: MediaCont
 
       {/* Background Control */}
       <div className="relative">
-        <motion.div
+        <motion.button
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.1 }}
-          className="bg-black/40 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl p-2"
+          onClick={() => setShowBackgroundMenu(!showBackgroundMenu)}
+          className={cn(
+            position === "inline" ? "px-4 py-3" : "px-4 py-3",
+            "rounded-xl transition-all duration-200 flex items-center gap-2 relative overflow-hidden",
+            showBackgroundMenu
+              ? "bg-white text-black"
+              : "text-white/70 hover:text-white hover:bg-white/10"
+          )}
         >
-          <button
-            onClick={() => setShowBackgroundMenu(!showBackgroundMenu)}
-            className={cn(
-              "w-full px-4 py-3 rounded-xl transition-all duration-200 flex items-center gap-2 relative overflow-hidden",
-              showBackgroundMenu
-                ? "bg-white text-black"
-                : "text-white/70 hover:text-white hover:bg-white/10"
+          {showBackgroundMenu && (
+            <motion.div
+              layoutId="activeBackgroundButton"
+              className="absolute inset-0 bg-white rounded-xl"
+              transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+            />
+          )}
+          <span className="relative z-10">
+            {currentBg?.type === "mp4" ? (
+              <Video className="h-4 w-4" />
+            ) : (
+              <Image className="h-4 w-4" />
             )}
-          >
-            {showBackgroundMenu && (
-              <motion.div
-                layoutId="activeBackgroundButton"
-                className="absolute inset-0 bg-white rounded-xl"
-                transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-              />
-            )}
-            <span className="relative z-10">
-              {currentBg?.type === "mp4" ? (
-                <Video className="h-4 w-4" />
-              ) : (
-                <Image className="h-4 w-4" />
-              )}
+          </span>
+          <span className="relative z-10 text-sm font-medium whitespace-nowrap">
+            {currentBg?.label || "Background"}
+          </span>
+          {isAnimated && (
+            <span className={cn(
+              "relative z-10 text-xs px-2 py-0.5 rounded-full",
+              showBackgroundMenu ? "bg-black/20 text-black/80" : "bg-white/20 text-white/80"
+            )}>
+              Animated
             </span>
-            <span className="relative z-10 text-sm font-medium whitespace-nowrap">
-              {currentBg?.label || "Background"}
-            </span>
-            {isAnimated && (
-              <span className={cn(
-                "relative z-10 text-xs px-2 py-0.5 rounded-full",
-                showBackgroundMenu ? "bg-black/20 text-black/80" : "bg-white/20 text-white/80"
-              )}>
-                Animated
-              </span>
-            )}
-          </button>
-        </motion.div>
+          )}
+        </motion.button>
 
         <AnimatePresence>
           {showBackgroundMenu && (
             <motion.div
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: position === "inline" ? -10 : 10 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 10 }}
-              className="absolute bottom-full left-0 mb-2 bg-black/40 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl p-2 min-w-[200px]"
+              exit={{ opacity: 0, y: position === "inline" ? -10 : 10 }}
+              className={cn(menuPositionClass, "bg-black/40 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl p-2 min-w-[200px]")}
             >
               <div className="space-y-1">
                 {Object.entries(backgroundMedia).map(([key, bg]) => (

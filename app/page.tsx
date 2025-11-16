@@ -33,6 +33,7 @@ import { LogoutButton } from "@/components/logout-button";
 import { ImmersiveLayout } from "@/components/immersive-layout";
 import { LampContainer } from "@/components/ui/lamp";
 import { FullscreenTimer } from "@/components/fullscreen-timer";
+import { FocusHome } from "@/components/focus-home";
 import { cn } from "@/lib/utils";
 import {
   BarChart,
@@ -109,7 +110,7 @@ export default function Home() {
   const pauseStartTimeRef = useRef<number | null>(null);
   const pausedDurationRef = useRef<number>(0);
   const [timerMode, setTimerMode] = useState<"default" | "chill">("default");
-  const [currentView, setCurrentView] = useState<"tasks" | "stats" | "archive">("tasks");
+  const [currentView, setCurrentView] = useState<"home" | "tasks" | "stats" | "archive">("home");
   const [archiveTodos, setArchiveTodos] = useState<Array<{ id: string; title: string; archivedAt: string; subtasks: Subtask[] }>>([]);
   const [archiveSearchTerm, setArchiveSearchTerm] = useState("");
   const [restoringTodoId, setRestoringTodoId] = useState<string | null>(null);
@@ -960,7 +961,12 @@ export default function Home() {
       {!isFullscreen && (
         <ImmersiveLayout currentView={currentView} onViewChange={setCurrentView}>
           <div className="min-h-screen">
-            <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 pt-24">
+            {currentView === "home" && (
+              <FocusHome />
+            )}
+            
+            {currentView !== "home" && (
+              <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 pt-24">
         {bootstrapState.error && todos.length === 0 && (
                 <motion.div
                   initial={{ opacity: 0, y: -20 }}
@@ -1406,7 +1412,8 @@ export default function Home() {
                   )}
                 </motion.div>
               )}
-            </div>
+              </div>
+            )}
           </div>
         </ImmersiveLayout>
       )}

@@ -2,13 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { LayoutDashboard, BarChart3, Archive, LogOut } from "lucide-react";
+import { LayoutDashboard, BarChart3, Archive, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LogoutButton } from "@/components/logout-button";
 import { MediaControls } from "@/components/media-controls";
 import { cn } from "@/lib/utils";
 
-type View = "tasks" | "stats" | "archive";
+type View = "home" | "tasks" | "stats" | "archive";
 
 interface ImmersiveLayoutProps {
   children: React.ReactNode;
@@ -53,6 +53,7 @@ export function ImmersiveLayout({
   }, [mouseTimeout]);
 
   const navItems = [
+    { id: "home" as View, label: "Focus", icon: Clock },
     { id: "tasks" as View, label: "Tasks", icon: LayoutDashboard },
     { id: "stats" as View, label: "Stats", icon: BarChart3 },
     { id: "archive" as View, label: "Archive", icon: Archive },
@@ -150,6 +151,12 @@ export function ImmersiveLayout({
                   </button>
                 );
               })}
+              {/* Media Controls - show in home and tasks view */}
+              {(currentView === "home" || currentView === "tasks") && (
+                <div className="ml-2 pl-2 border-l border-white/10 flex items-center">
+                  <MediaControls position="inline" onBackgroundChange={setBackground} />
+                </div>
+              )}
               <div className="ml-2 pl-2 border-l border-white/10 flex items-center">
                 <LogoutButton />
               </div>
@@ -157,9 +164,6 @@ export function ImmersiveLayout({
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Media Controls */}
-      <MediaControls onBackgroundChange={setBackground} />
 
       {/* Content Area */}
       <div className="relative z-10 h-full overflow-y-auto">
