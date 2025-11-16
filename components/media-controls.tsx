@@ -12,7 +12,6 @@ const backgroundMedia: Record<string, { url: string; type: "gif" | "mp4"; label:
   ocean: { url: "https://images.squarespace-cdn.com/content/v1/5fe4caeadae61a2f19719512/03cff432-8971-4738-981b-fe426789fced/The+Dock?format=2500w", type: "gif", label: "Ocean" },
   anime: { url: "https://p3-pc-sign.douyinpic.com/tos-cn-i-0813/3c82c3e856ca49538eb34e6c87c91877~noop.jpeg?biz_tag=pcweb_cover&card_type=303&column_n=0&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&se=false&x-expires=1764334800&x-signature=TVUrnyKU0ZViqJJDIx1hS3Lyq6I%3D", type: "gif", label: "Anime" },
   city: { url: "https://user-images.githubusercontent.com/53535277/97919236-75a9f480-1d25-11eb-8ee1-5a6293ff8998.gif", type: "gif", label: "City" },
-  hina: { url: "/Hina Demon Queen.mp4", type: "mp4", label: "Hina" },
 };
 
 const musicOptions = [
